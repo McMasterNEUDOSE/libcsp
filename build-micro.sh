@@ -1,0 +1,1 @@
+./waf configure --toolchain=microblazeel-unknown-linux-gnu- --includes=/home/stephen/SBX2021_CDH/ext/freertos/include,/home/stephen/SBX2021_CDH/ext/freertos/portable/GCC/ARM_CM4F,/home/stephen/SBX2021_CDH/conf --with-os=freertos

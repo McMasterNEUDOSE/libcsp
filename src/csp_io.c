@@ -39,7 +39,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "csp_init.h"
 #include "csp_port.h"
 #include "csp_conn.h"
-#include "csp_promisc.h"
 #include "csp_qfifo.h"
 #include "transport/csp_transport.h"
 
