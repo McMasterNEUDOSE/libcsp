@@ -448,14 +448,16 @@ static PyObject* pycsp_route_start_task(PyObject *self, PyObject *args) {
 
 static PyObject* pycsp_ping(PyObject *self, PyObject *args) {
     uint8_t node;
-    uint32_t timeout = 1000;
-    unsigned int size = 10;
+    uint32_t timeout = 3000;
+    unsigned int size = 100;
     uint8_t conn_options = CSP_O_NONE;
+    //printf("hello");
     if (!PyArg_ParseTuple(args, "b|IIb", &node, &timeout, &size, &conn_options)) {
         return NULL; // TypeError is thrown
     }
 
-    int res;
+    //printf("%x %x %x %x",node, timeout, size, conn_options);
+    int res=1;
     Py_BEGIN_ALLOW_THREADS;
     res = csp_ping(node, timeout, size, conn_options);
     Py_END_ALLOW_THREADS;
@@ -463,6 +465,7 @@ static PyObject* pycsp_ping(PyObject *self, PyObject *args) {
     if (res < 0) {
         return PyErr_Error("csp_ping()", res);
     }
+
 
     return Py_BuildValue("i", res);
 }
@@ -807,6 +810,35 @@ static PyObject* pycsp_zmqhub_init(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject* pycsp_zmqhub_init_w_endpoints(PyObject *self, PyObject *args) {
+    char addr;
+    char* publisher_endpoint;
+    char* subscriber_endpoint;
+    char pub[100];
+    char sub[100];
+
+    if (!PyArg_ParseTuple(args, "bss", &addr, &publisher_endpoint, &subscriber_endpoint)) {
+        return NULL; // TypeError is thrown
+    }
+
+    strcpy(pub,publisher_endpoint);
+    strcpy(sub,subscriber_endpoint);
+
+    int res = csp_zmqhub_init_w_endpoints(addr, pub, sub, 0, NULL);
+    if (res != CSP_ERR_NONE) {
+        return PyErr_Error("csp_zmqhub_init_w_endpoints()", res);
+    }
+
+    Py_RETURN_NONE;
+}
+//==============
+//int csp_zmqhub_init_w_endpoints(uint8_t addr,
+//                                const char * publisher_endpoint,
+//				const char * subscriber_endpoint,
+//                                uint32_t flags,
+//                                csp_iface_t ** return_interface) {
+//==============
+
 static PyObject* pycsp_can_socketcan_init(PyObject *self, PyObject *args) {
     char* ifc;
     int bitrate = 1000000;
@@ -948,6 +980,7 @@ static PyMethodDef methods[] = {
 
     /* csp/interfaces/csp_if_zmqhub.h */
     {"zmqhub_init",         pycsp_zmqhub_init,         METH_VARARGS, ""},
+    {"zmqhub_init_w_endpoints",         pycsp_zmqhub_init_w_endpoints,         METH_VARARGS, ""},
     {"kiss_init",           pycsp_kiss_init,           METH_VARARGS, ""},
 
     /* csp/drivers/can_socketcan.h */

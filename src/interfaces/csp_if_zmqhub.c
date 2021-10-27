@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include <zmq.h>
 #include <assert.h>
+#include <stdlib.h>
+
 
 #include <csp/csp.h>
 #include <csp/csp_debug.h>
@@ -52,20 +54,73 @@ typedef struct {
 int csp_zmqhub_tx(const csp_route_t * route, csp_packet_t * packet) {
 
 	zmq_driver_t * drv = route->iface->driver_data;
+	//printf("%0x \n\r",length);
+
+	// =============
+	//original implementation (no length field, destination was first byte, followed by header and data)
+	// =============
+	//const uint8_t dest = (route->via != CSP_NO_VIA_ADDRESS) ? route->via : packet->id.dst;
+	//uint8_t * destptr = ((uint8_t *) &packet->id) - sizeof(dest);
+	//memcpy(destptr, &dest, sizeof(dest));
+	//csp_bin_sem_wait(&drv->tx_wait, 1000); /* Using ZMQ in thread safe manner*/
+	//int result = zmq_send(drv->publisher, destptr, length + sizeof(packet->id) + sizeof(dest), 0);
+	//csp_bin_sem_post(&drv->tx_wait); /* Release tx semaphore */
+	//===============
+
+	//===============
+	//modified implementation (csp packet, i.e. length field, header field, data)
+	// |CSP DEST ADR = 1 byte| SECONDARY SYNC = 3 BYTE| GNURADIO LENGTH FIELD = 4 BYTE | CSP PACKET (2 Byte for length, 4 byte for header, remaining data)|
+	//===============
+
+	uint16_t length = (packet->length);
+	uint32_t csp_header = (packet->id.ext);
+
+	uint16_t swap_length = csp_hton16(length);
+	uint32_t swap_header = csp_hton32(csp_header);
 
 	const uint8_t dest = (route->via != CSP_NO_VIA_ADDRESS) ? route->via : packet->id.dst;
+	//uint8_t * destptr = ((uint8_t *) &packet->id) - sizeof(dest);
+	uint8_t * gnuradio_packet = malloc(11 + sizeof(packet->length) + sizeof(packet->id.ext) + length);
+	const uint8_t sync_ext[] = {0x41,0x4E,0x54};
+	const uint16_t gnuradio_packet_length = csp_hton16(sizeof(length)+ sizeof(csp_header)+length);
+	
+	memcpy(gnuradio_packet, &dest, sizeof(dest));
+	memcpy(gnuradio_packet+1, sync_ext, sizeof(sync_ext));
+	memcpy(gnuradio_packet+4, &gnuradio_packet_length, sizeof(length));
+	memcpy(gnuradio_packet+6, &gnuradio_packet_length, sizeof(length));
+	memcpy(gnuradio_packet+8, &swap_length, sizeof(length));
+	memcpy(gnuradio_packet+10, &swap_header, sizeof(csp_header));
+	memcpy(gnuradio_packet+14, &packet->data, length);
+	//printf("%0x \n\r",packet->length);
+	//printf("%0x \n\r",packet->id.ext);
+	//printf("%0x \n\r",packet->data[0]);
 
-	uint16_t length = packet->length;
-	uint8_t * destptr = ((uint8_t *) &packet->id) - sizeof(dest);
-	memcpy(destptr, &dest, sizeof(dest));
+	//printf("%0x \n\r",gnuradio_packet[8]);
+	//printf("%0x \n\r",gnuradio_packet[10]);
+	//printf("%0x \n\r",gnuradio_packet[14]);
+	//printf("%i \n\r", gnuradio_packet_length);
+	//memcpy(gnuradio_packet+14+length, &dest, sizeof(dest));
+	//TODO: Figure out what happens with multiple bytes in data[] field in packet, see if they flip
+
+	
+	csp_log_packet("Input: Src %u, Dst %u, Dport %u, Sport %u, Pri %u, Flags 0x%02X, Size %"PRIu16,
+                       packet->id.src, packet->id.dst, packet->id.dport,
+                       packet->id.sport, packet->id.pri, packet->id.flags, packet->length);
+	//uint32_t packetid = packet->id.ext;
+	//printf("Output CSP header is : %x\n\r",packetid);
+	//uint8_t * destptr = ((uint8_t *) &packet->length);
 	csp_bin_sem_wait(&drv->tx_wait, 1000); /* Using ZMQ in thread safe manner*/
-	int result = zmq_send(drv->publisher, destptr, length + sizeof(packet->id) + sizeof(dest), 0);
+	int result = zmq_send(drv->publisher, gnuradio_packet, csp_hton16(gnuradio_packet_length) + sizeof(packet->length)*2 + sizeof(sync_ext) + sizeof(dest), 0);
 	csp_bin_sem_post(&drv->tx_wait); /* Release tx semaphore */
+	//===============
 	if (result < 0) {
 		csp_log_error("ZMQ send error: %u %s\r\n", result, zmq_strerror(zmq_errno()));
 	}
+	//printf("ZMQ Send Successful\n\r");
 
 	csp_buffer_free(packet);
+	
+	free(gnuradio_packet);
 
 	return CSP_ERR_NONE;
 
@@ -75,7 +130,16 @@ CSP_DEFINE_TASK(csp_zmqhub_task) {
 
 	zmq_driver_t * drv = param;
 	csp_packet_t * packet;
-	const uint32_t HEADER_SIZE = (sizeof(packet->id) + sizeof(uint8_t));
+	// =============
+	//original implementation (no length field, destination was first byte, followed by header and data)
+	// =============
+	const uint32_t HEADER_SIZE = (sizeof(packet->id) + sizeof(uint16_t));
+	//==============
+	//===============
+	//modified implementation (csp packet, i.e. length field, header field, data)
+	//===============
+	//const uint32_t HEADER_SIZE = (sizeof(packet->id) + sizeof(packet->length));
+	//===============
 
 	//csp_log_info("RX %s started", drv->iface.name);
 
@@ -86,6 +150,7 @@ CSP_DEFINE_TASK(csp_zmqhub_task) {
 		// Receive data
 		if (zmq_msg_recv(&msg, drv->subscriber, 0) < 0) {
 			csp_log_error("RX %s: %s", drv->iface.name, zmq_strerror(zmq_errno()));
+			//printf("Receive Error\n\r");
 			continue;
 		}
 
@@ -93,27 +158,66 @@ CSP_DEFINE_TASK(csp_zmqhub_task) {
 		if (datalen < HEADER_SIZE) {
 			csp_log_warn("RX %s: Too short datalen: %u - expected min %u bytes", drv->iface.name, datalen, HEADER_SIZE);
 			zmq_msg_close(&msg);
+			//printf("Message Size Error\n\r");
 			continue;
 		}
 
 		// Create new csp packet
 		packet = csp_buffer_get(datalen - HEADER_SIZE);
+		//printf("Data Length %i",datalen-HEADER_SIZE);
 		if (packet == NULL) {
 			csp_log_warn("RX %s: Failed to get csp_buffer(%u)", drv->iface.name, datalen);
 			zmq_msg_close(&msg);
+			//printf("3");
 			continue;
 		}
 
 		// Copy the data from zmq to csp
 		const uint8_t * rx_data = zmq_msg_data(&msg);
 
+		// =============
+		//original implementation (no length field, destination was first byte, followed by header and data)
+		// =============
 		// First byte is the "via" address
+		//++rx_data;
+		//--datalen;
+		
+		
+		// Remaining is CSP header and payload
+		//memcpy(&packet->id, rx_data, datalen);
+		//packet->length = (datalen - sizeof(packet->id));
+		//===============
+
+		//===============
+		//modified implementation (csp packet, i.e. length field, header field, data, with first byte being address)
+		//===============
+		// First bytes are via address (1 byte), 
 		++rx_data;
 		--datalen;
 
-		// Remaining is CSP header and payload
-		memcpy(&packet->id, rx_data, datalen);
-		packet->length = (datalen - sizeof(packet->id));
+
+		// Remaining is CSP length, header and payload
+		memcpy(&packet->length, rx_data, datalen);
+
+		//packet->length = (datalen - sizeof(packet->id));
+		//printf("Input CSP header is : %x\n\r",packet->id);
+
+		//printf("length preswap %i\n\r",packet->length);
+		//printf("packet preswap data %0x\n\r",packet->id.ext);
+		uint16_t swap_length = csp_hton16(packet->length);
+		uint32_t swap_header = csp_hton32(packet->id.ext);
+		//printf("length postswap %i\n\r",swap_length);
+		//printf("packet postswap data %0x\n\r",swap_header);
+		//printf("packet postswap data %0x",packet->data);
+		
+		packet->length = swap_length;
+		packet->id.ext = swap_header;
+		//printf("Packet Length: %0x Packet Header: %0x \n\r",packet->length, packet->id.ext);
+
+		//===============
+		csp_log_packet("Input: Src %u, Dst %u, Dport %u, Sport %u, Pri %u, Flags 0x%02X, Size %"PRIu16,
+                       packet->id.src, packet->id.dst, packet->id.dport,
+                       packet->id.sport, packet->id.pri, packet->id.flags, packet->length);
 
 		// Route packet
 		csp_qfifo_write(packet, &drv->iface, NULL);
