@@ -451,12 +451,10 @@ static PyObject* pycsp_ping(PyObject *self, PyObject *args) {
     uint32_t timeout = 3000;
     unsigned int size = 100;
     uint8_t conn_options = CSP_O_NONE;
-    //printf("hello");
     if (!PyArg_ParseTuple(args, "b|IIb", &node, &timeout, &size, &conn_options)) {
         return NULL; // TypeError is thrown
     }
 
-    //printf("%x %x %x %x",node, timeout, size, conn_options);
     int res=1;
     Py_BEGIN_ALLOW_THREADS;
     res = csp_ping(node, timeout, size, conn_options);
@@ -831,13 +829,6 @@ static PyObject* pycsp_zmqhub_init_w_endpoints(PyObject *self, PyObject *args) {
 
     Py_RETURN_NONE;
 }
-//==============
-//int csp_zmqhub_init_w_endpoints(uint8_t addr,
-//                                const char * publisher_endpoint,
-//				const char * subscriber_endpoint,
-//                                uint32_t flags,
-//                                csp_iface_t ** return_interface) {
-//==============
 
 static PyObject* pycsp_can_socketcan_init(PyObject *self, PyObject *args) {
     char* ifc;

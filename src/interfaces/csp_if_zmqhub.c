@@ -168,7 +168,6 @@ CSP_DEFINE_TASK(csp_zmqhub_task) {
 		if (packet == NULL) {
 			csp_log_warn("RX %s: Failed to get csp_buffer(%u)", drv->iface.name, datalen);
 			zmq_msg_close(&msg);
-			//printf("3");
 			continue;
 		}
 
